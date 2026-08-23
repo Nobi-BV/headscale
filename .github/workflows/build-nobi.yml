@@ -9,7 +9,10 @@ on:
 
 env:
   KO_DOCKER_REPO: 456815938706.dkr.ecr.eu-central-1.amazonaws.com/nobi/headscale
-  KO_DEFAULTBASEIMAGE: gcr.io/distroless/base-debian13
+  # The wrenix/headscale chart's generate-key init container execs `sh -c`
+  # against this same image (see jobs.yaml in the chart), so the base image
+  # needs a shell (busybox) - the non-debug distroless base doesn't have one.
+  KO_DEFAULTBASEIMAGE: gcr.io/distroless/base-debian13:debug
 
 jobs:
   build:
@@ -41,12 +44,10 @@ jobs:
         id: tags
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            tags="${GITHUB_REF_NAME},sha-${GITHUB_SHA::7}"
+            echo "tags=${GITHUB_REF_NAME},sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           else
-            tags="sha-${GITHUB_SHA::7}"
+            echo "tags=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
-          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
-          echo "debug_tags=$(echo "$tags" | sed 's/\([^,]*\)/\1-debug/g')" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         env:
@@ -56,20 +57,4 @@ jobs:
             --bare \
             --platform=linux/arm64 \
             --tags="${{ steps.tags.outputs.tags }}" \
-            ./cmd/headscale
-
-      # The wrenix/headscale chart's generate-key init container execs `sh -c`
-      # against this same image (see jobs.yaml in the chart) - the hardened
-      # distroless base above has no shell, so a debug variant (busybox, sh
-      # included) is required for that to work. Matches upstream's own
-      # ghcr-debug kos target in .goreleaser.yml.
-      - name: Build and push (debug)
-        env:
-          CGO_ENABLED: "0"
-          KO_DEFAULTBASEIMAGE: gcr.io/distroless/base-debian13:debug
-        run: |
-          ko build \
-            --bare \
-            --platform=linux/arm64 \
-            --tags="${{ steps.tags.outputs.debug_tags }}" \
             ./cmd/headscale
