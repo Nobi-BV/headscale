@@ -41,10 +41,12 @@ jobs:
         id: tags
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "tags=${GITHUB_REF_NAME},sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            tags="${GITHUB_REF_NAME},sha-${GITHUB_SHA::7}"
           else
-            echo "tags=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            tags="sha-${GITHUB_SHA::7}"
           fi
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "debug_tags=$(echo "$tags" | sed 's/\([^,]*\)/\1-debug/g')" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         env:
@@ -54,4 +56,20 @@ jobs:
             --bare \
             --platform=linux/arm64 \
             --tags="${{ steps.tags.outputs.tags }}" \
+            ./cmd/headscale
+
+      # The wrenix/headscale chart's generate-key init container execs `sh -c`
+      # against this same image (see jobs.yaml in the chart) - the hardened
+      # distroless base above has no shell, so a debug variant (busybox, sh
+      # included) is required for that to work. Matches upstream's own
+      # ghcr-debug kos target in .goreleaser.yml.
+      - name: Build and push (debug)
+        env:
+          CGO_ENABLED: "0"
+          KO_DEFAULTBASEIMAGE: gcr.io/distroless/base-debian13:debug
+        run: |
+          ko build \
+            --bare \
+            --platform=linux/arm64 \
+            --tags="${{ steps.tags.outputs.debug_tags }}" \
             ./cmd/headscale
