@@ -1,0 +1,57 @@
+---
+name: Build Nobi
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '*nobi*'
+
+env:
+  KO_DOCKER_REPO: 456815938706.dkr.ecr.eu-central-1.amazonaws.com/nobi/headscale
+  KO_DEFAULTBASEIMAGE: gcr.io/distroless/base-debian13
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_CI_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@19d944daaa35f0fa1d3f7f8af1d3f2e5de25c5b7 # v2.1.4
+
+      - name: Set image tags
+        id: tags
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "tags=${GITHUB_REF_NAME},sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          ko build \
+            --bare \
+            --platform=linux/arm64 \
+            --tags="${{ steps.tags.outputs.tags }}" \
+            ./cmd/headscale
